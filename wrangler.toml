@@ -1,0 +1,5 @@
+name = "next-app"
+compatibility_date = "2025-04-16"
+pages_build_output_dir = ".vercel/output"
+
+compatibility_flags = ["nodejs_compat"]
