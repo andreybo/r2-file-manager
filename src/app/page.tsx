@@ -1080,3 +1080,5 @@ export default function FileExplorer() {
     </div>
   );
 }
+
+export const dynamic = 'force-static';
