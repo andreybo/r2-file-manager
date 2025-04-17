@@ -265,7 +265,7 @@ const formatFileSize = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-// Function to build a folder structure from file paths
+// Function to build a folder structure from file paths and explicit folder objects
 const buildFolderStructure = (files: FileMetadata[]): Folder[] => {
   console.log('Building folder structure from files:', files);
   
@@ -273,24 +273,49 @@ const buildFolderStructure = (files: FileMetadata[]): Folder[] => {
   const folderMap = new Map<string, Folder>();
   folderMap.set('/', root);
 
-  // First pass: extract all potential folder paths from all files
+  // First pass: extract all potential folder paths from all files and explicitly marked folders
   const allPaths = new Set<string>();
   
   // Add root folder
   allPaths.add('/');
   
-  // Process all files to extract folder paths
+  // Process all files and folder objects to extract paths
   files.forEach(file => {
-    const path = file.fileKey;
-    const parts = path.split('/');
-    
-    // Build path hierarchy
-    let currentPath = '';
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!parts[i]) continue; // Skip empty parts
+    // Handle explicit folder objects first
+    if (file.isFolder) {
+      // Normalize folder paths to ensure consistency
+      let folderPath = file.fileKey;
+      if (folderPath.endsWith('/')) {
+        folderPath = folderPath.slice(0, -1);
+      }
+      if (!folderPath.startsWith('/')) {
+        folderPath = `/${folderPath}`;
+      }
+      if (folderPath === '') folderPath = '/';
       
-      currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
-      allPaths.add(`/${currentPath}`);
+      allPaths.add(folderPath);
+      console.log(`Added explicit folder path: ${folderPath}`);
+      
+      // Also add all parent folder paths
+      const parts = folderPath.split('/').filter(Boolean);
+      let parentPath = '';
+      for (let i = 0; i < parts.length; i++) {
+        parentPath = parentPath ? `${parentPath}/${parts[i]}` : `/${parts[i]}`;
+        allPaths.add(parentPath);
+      }
+    } else {
+      // Regular files - extract folder paths
+      const path = file.fileKey;
+      const parts = path.split('/');
+      
+      // Build path hierarchy
+      let currentPath = '';
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!parts[i]) continue; // Skip empty parts
+        
+        currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
+        allPaths.add(`/${currentPath}`);
+      }
     }
   });
   
@@ -589,12 +614,20 @@ export default function FileExplorer() {
                   // Files in subdirectories
                   const subPath = `${mainFolderPath}/${subPathParts.slice(1).join('/')}`;
                   
-                  // Create subdirectory first
-                  const subMarkerFile = new File([new Blob([''], { type: 'text/plain' })], '.keep', { type: 'text/plain' });
-                  uploadPromises.push(
-                    uploadFile(subMarkerFile, subPath)
-                      .then(() => uploadFile(file, subPath))
-                  );
+                  // Create all intermediate directories by creating marker files
+                  const createAllFolders = async () => {
+                    let currentPath = mainFolderPath;
+                    // Process each path segment to ensure all intermediate directories exist
+                    for (let i = 1; i < subPathParts.length; i++) {
+                      currentPath = `${currentPath}/${subPathParts[i]}`;
+                      const folderMarkerFile = new File([new Blob([''], { type: 'text/plain' })], '.keep', { type: 'text/plain' });
+                      await uploadFile(folderMarkerFile, currentPath);
+                    }
+                    // After all directories are created, upload the actual file
+                    return uploadFile(file, subPath);
+                  };
+                  
+                  uploadPromises.push(createAllFolders());
                 }
               }
             });

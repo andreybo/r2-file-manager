@@ -115,6 +115,42 @@ export async function listFiles(folderPath: string = '/'): Promise<FileMetadata[
       
       // Process objects from recursive listing
       if (recursiveResponse.Contents) {
+        // First, collect all potential folder paths from file keys
+        const folderPaths = new Set<string>();
+        
+        recursiveResponse.Contents.forEach(item => {
+          const fileKey = item.Key || '';
+          const parts = fileKey.split('/');
+          
+          // Add all parent folder paths
+          let path = '';
+          for (let i = 0; i < parts.length - 1; i++) {
+            if (!parts[i]) continue;
+            path = path ? `${path}/${parts[i]}` : parts[i];
+            folderPaths.add(`/${path}/`);
+          }
+        });
+        
+        console.log('Detected folder paths:', Array.from(folderPaths));
+        
+        // Add folder objects for all detected paths
+        const folderObjects = Array.from(folderPaths).map(folderPath => {
+          const pathParts = folderPath.split('/').filter(Boolean);
+          const folderName = pathParts[pathParts.length - 1] || '';
+          
+          return {
+            name: folderName,
+            url: '',
+            publicUrl: `https://files.careerweb.org${folderPath}`,
+            size: 0,
+            uploadDate: new Date().toISOString().split('T')[0],
+            folderPath: '/' + pathParts.slice(0, -1).join('/'),
+            fileKey: folderPath,
+            isFolder: true,
+          } as FileMetadata;
+        });
+        
+        // Process actual files
         const filePromises = recursiveResponse.Contents.map(async item => {
           const fileKey = item.Key || '';
           const name = fileKey.split('/').pop() || fileKey;
@@ -145,7 +181,8 @@ export async function listFiles(folderPath: string = '/'): Promise<FileMetadata[
         });
         
         const processedFiles = await Promise.all(filePromises);
-        allObjects = processedFiles.filter(Boolean) as FileMetadata[];
+        // Combine folder objects with file objects
+        allObjects = [...folderObjects, ...processedFiles.filter(Boolean)] as FileMetadata[];
       }
       
       // Add folder placeholders from CommonPrefixes
@@ -443,13 +480,22 @@ export async function uploadFolder(folderEntry: FileSystemDirectoryEntry, baseFo
         
         console.log(`Creating subfolder: ${subFolderPath}`);
         
-        // Create marker file for the subfolder
-        try {
-          const subMarkerFile = new File([new Blob([''], { type: 'text/plain' })], '.keep', { type: 'text/plain' });
-          const subMarkerMetadata = await uploadFile(subMarkerFile, subFolderPath);
-          results.push(subMarkerMetadata);
-        } catch (error) {
-          console.error(`Error creating subfolder ${subFolderPath}:`, error);
+        // Extract path parts to create all intermediate directories if needed
+        const pathParts = subFolderPath.split('/').filter(Boolean);
+        let buildPath = '';
+        
+        // Ensure all intermediate directories exist by creating marker files for each level
+        for (let i = 0; i < pathParts.length; i++) {
+          buildPath = buildPath ? `${buildPath}/${pathParts[i]}` : `/${pathParts[i]}`;
+          
+          try {
+            console.log(`Ensuring intermediate directory exists: ${buildPath}`);
+            const intermediateMarkerFile = new File([new Blob([''], { type: 'text/plain' })], '.keep', { type: 'text/plain' });
+            const markerMetadata = await uploadFile(intermediateMarkerFile, buildPath);
+            results.push(markerMetadata);
+          } catch (error) {
+            console.error(`Error creating intermediate directory ${buildPath}:`, error);
+          }
         }
         
         // Process this subdirectory recursively
